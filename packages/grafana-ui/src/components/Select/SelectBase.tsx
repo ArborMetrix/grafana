@@ -26,6 +26,27 @@ import { getSelectStyles } from './getSelectStyles';
 import { cleanValue } from './utils';
 import { SelectBaseProps, SelectValue } from './types';
 
+interface ExtraValuesIndicatorProps {
+  maxVisibleValues?: number | undefined;
+  selectedValuesCount: number;
+  menuIsOpen: boolean;
+  showAllSelectedWhenOpen: boolean;
+}
+
+const renderExtraValuesIndicator = (props: ExtraValuesIndicatorProps) => {
+  const { maxVisibleValues, selectedValuesCount, menuIsOpen, showAllSelectedWhenOpen } = props;
+
+  if (
+    maxVisibleValues !== undefined &&
+    selectedValuesCount > maxVisibleValues &&
+    !(showAllSelectedWhenOpen && menuIsOpen)
+  ) {
+    return <span>(+{selectedValuesCount - maxVisibleValues})</span>;
+  }
+
+  return null;
+};
+
 const CustomControl = (props: any) => {
   const {
     children,
@@ -68,6 +89,7 @@ export function SelectBase<T>({
   allowCustomValue = false,
   autoFocus = false,
   backspaceRemovesValue = true,
+  closeMenuOnSelect = true,
   components,
   defaultOptions,
   defaultValue,
@@ -85,6 +107,7 @@ export function SelectBase<T>({
   loadOptions,
   loadingMessage = 'Loading options...',
   maxMenuHeight = 300,
+  maxVisibleValues,
   menuPosition,
   menuPlacement = 'auto',
   noOptionsMessage = 'No options found',
@@ -100,6 +123,7 @@ export function SelectBase<T>({
   placeholder = 'Choose',
   prefix,
   renderControl,
+  showAllSelectedWhenOpen = true,
   size = 'auto',
   tabSelectsValue = true,
   value,
@@ -144,6 +168,7 @@ export function SelectBase<T>({
     autoFocus,
     backspaceRemovesValue,
     captureMenuScroll: false,
+    closeMenuOnSelect,
     defaultValue,
     // Also passing disabled, as this is the new Select API, and I want to use this prop instead of react-select's one
     disabled,
@@ -158,6 +183,7 @@ export function SelectBase<T>({
     isMulti,
     isSearchable,
     maxMenuHeight,
+    maxVisibleValues,
     menuIsOpen: isOpen,
     menuPlacement,
     menuPosition,
@@ -173,6 +199,7 @@ export function SelectBase<T>({
     placeholder,
     prefix,
     renderControl,
+    showAllSelectedWhenOpen,
     tabSelectsValue,
     value: isMulti ? selectedValue : selectedValue[0],
   };
@@ -205,7 +232,21 @@ export function SelectBase<T>({
         components={{
           MenuList: SelectMenu,
           Group: SelectOptionGroup,
-          ValueContainer: ValueContainer,
+          ValueContainer: (props: any) => {
+            const { menuIsOpen } = props.selectProps;
+            if (
+              Array.isArray(props.children) &&
+              Array.isArray(props.children[0]) &&
+              maxVisibleValues !== undefined &&
+              !(showAllSelectedWhenOpen && menuIsOpen)
+            ) {
+              const [valueChildren, ...otherChildren] = props.children;
+              return (
+                <ValueContainer {...props} children={[valueChildren.slice(0, maxVisibleValues), ...otherChildren]} />
+              );
+            }
+            return <ValueContainer {...props} />;
+          },
           Placeholder: (props: any) => (
             <div
               {...props.innerProps}
@@ -225,7 +266,23 @@ export function SelectBase<T>({
               {props.children}
             </div>
           ),
-          IndicatorsContainer: IndicatorsContainer,
+          IndicatorsContainer: (props: any) => {
+            const { selectProps } = props;
+            const { value, showAllSelectedWhenOpen, maxVisibleValues, menuIsOpen } = selectProps;
+            const selectedValuesCount = value.length;
+            const truncatedChildren = [...props.children];
+            truncatedChildren.splice(
+              -1,
+              0,
+              renderExtraValuesIndicator({
+                maxVisibleValues,
+                selectedValuesCount,
+                showAllSelectedWhenOpen,
+                menuIsOpen,
+              })
+            );
+            return <IndicatorsContainer {...props} children={truncatedChildren} />;
+          },
           IndicatorSeparator: () => <></>,
           Control: CustomControl,
           Option: SelectMenuOptions,

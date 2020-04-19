@@ -1,9 +1,11 @@
 package notifiers
 
 import (
+	"crypto/md5"
 	"fmt"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/grafana/grafana/pkg/bus"
 	"github.com/grafana/grafana/pkg/components/simplejson"
 	"github.com/grafana/grafana/pkg/infra/log"
@@ -37,6 +39,26 @@ func init() {
         </gf-form-switch>
       </div>
       <div class="gf-form">
+        <label class="gf-form-label width-14">Alias</label>
+        <div class="gf-form-select-wrapper">
+          <select 
+            class="gf-form-input" 
+            ng-model="ctrl.model.settings.alias" 
+            ng-options="s for s in ['Alert ID','Conditions Hash','UUID']" 
+            ng-init="ctrl.model.settings.alias=ctrl.model.settings.alias || 'Alert ID'">
+          </select>
+        </div>
+      </div>
+      <div class="gf-form">
+        <gf-form-switch
+           class="gf-form"
+           label="Override alias"
+           label-class="width-14"
+           checked="ctrl.model.settings.overrideAlias"
+           tooltip="Allow the alert alias to be set using the og_alias tag">
+        </gf-form-switch>
+      </div>
+      <div class="gf-form">
         <gf-form-switch
            class="gf-form"
            label="Override priority"
@@ -44,7 +66,16 @@ func init() {
            checked="ctrl.model.settings.overridePriority"
            tooltip="Allow the alert priority to be set using the og_priority tag">
         </gf-form-switch>
-  </div>
+      </div>
+      <div class="gf-form">
+        <gf-form-switch
+           class="gf-form"
+           label="Override responders"
+           label-class="width-14"
+           checked="ctrl.model.settings.overrideResponders"
+           tooltip="Allow the alert responders to be set using the og_responders tag">
+        </gf-form-switch>
+      </div>
 `,
 	})
 }
@@ -56,7 +87,10 @@ var (
 // NewOpsGenieNotifier is the constructor for OpsGenie.
 func NewOpsGenieNotifier(model *models.AlertNotification) (alerting.Notifier, error) {
 	autoClose := model.Settings.Get("autoClose").MustBool(true)
+	alias := model.Settings.Get("alias").MustString()
+	overrideAlias := model.Settings.Get("overrideAlias").MustBool(true)
 	overridePriority := model.Settings.Get("overridePriority").MustBool(true)
+	overrideResponders := model.Settings.Get("overrideResponders").MustBool(true)
 	apiKey := model.Settings.Get("apiKey").MustString()
 	apiURL := model.Settings.Get("apiUrl").MustString()
 	if apiKey == "" {
@@ -67,12 +101,15 @@ func NewOpsGenieNotifier(model *models.AlertNotification) (alerting.Notifier, er
 	}
 
 	return &OpsGenieNotifier{
-		NotifierBase:     NewNotifierBase(model),
-		APIKey:           apiKey,
-		APIUrl:           apiURL,
-		AutoClose:        autoClose,
-		OverridePriority: overridePriority,
-		log:              log.New("alerting.notifier.opsgenie"),
+		NotifierBase:       NewNotifierBase(model),
+		APIKey:             apiKey,
+		APIUrl:             apiURL,
+		AutoClose:          autoClose,
+		Alias:              alias,
+		OverrideAlias:      overrideAlias,
+		OverridePriority:   overridePriority,
+		OverrideResponders: overrideResponders,
+		log:                log.New("alerting.notifier.opsgenie"),
 	}, nil
 }
 
@@ -80,11 +117,14 @@ func NewOpsGenieNotifier(model *models.AlertNotification) (alerting.Notifier, er
 // alert notifications to OpsGenie
 type OpsGenieNotifier struct {
 	NotifierBase
-	APIKey           string
-	APIUrl           string
-	AutoClose        bool
-	OverridePriority bool
-	log              log.Logger
+	APIKey             string
+	APIUrl             string
+	AutoClose          bool
+	Alias              string
+	OverrideAlias      bool
+	OverridePriority   bool
+	OverrideResponders bool
+	log                log.Logger
 }
 
 // Notify sends an alert notification to OpsGenie.
@@ -118,7 +158,6 @@ func (on *OpsGenieNotifier) createAlert(evalContext *alerting.EvalContext) error
 	bodyJSON := simplejson.New()
 	bodyJSON.Set("message", evalContext.Rule.Name)
 	bodyJSON.Set("source", "Grafana")
-	bodyJSON.Set("alias", "alertId-"+strconv.FormatInt(evalContext.Rule.ID, 10))
 	bodyJSON.Set("description", fmt.Sprintf("%s - %s\n%s\n%s", evalContext.Rule.Name, ruleURL, evalContext.Rule.Message, customData))
 
 	details := simplejson.New()
@@ -129,6 +168,7 @@ func (on *OpsGenieNotifier) createAlert(evalContext *alerting.EvalContext) error
 
 	bodyJSON.Set("details", details)
 
+	aliasSource := on.Alias
 	tags := make([]string, 0)
 	for _, tag := range evalContext.Rule.AlertRuleTags {
 		if len(tag.Value) > 0 {
@@ -143,9 +183,30 @@ func (on *OpsGenieNotifier) createAlert(evalContext *alerting.EvalContext) error
 					bodyJSON.Set("priority", tag.Value)
 				}
 			}
+		} else if tag.Key == "og_alias" {
+			if on.OverrideAlias && len(tag.Value) > 0 {
+				aliasSource = tag.Value
+			}
+		} else if tag.Key == "og_responders" {
+			if on.OverrideResponders && len(tag.Value) > 0 {
+				bodyJSON.Set("responders", tag.Value)
+			}
 		}
 	}
 	bodyJSON.Set("tags", tags)
+
+	alias := "alertId-" + strconv.FormatInt(evalContext.Rule.ID, 10)
+	switch aliasSource {
+	case "Conditions Hash":
+		alias = fmt.Sprintf("%x", md5.Sum([]byte(customData)))
+	case "UUID":
+		alias = uuid.New().String()
+	default:
+		if aliasSource != "Alert ID" && on.OverrideAlias {
+			alias = aliasSource
+		}
+	}
+	bodyJSON.Set("alias", alias)
 
 	body, _ := bodyJSON.MarshalJSON()
 

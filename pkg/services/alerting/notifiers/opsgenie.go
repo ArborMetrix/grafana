@@ -67,15 +67,6 @@ func init() {
            tooltip="Allow the alert priority to be set using the og_priority tag">
         </gf-form-switch>
       </div>
-      <div class="gf-form">
-        <gf-form-switch
-           class="gf-form"
-           label="Override responders"
-           label-class="width-14"
-           checked="ctrl.model.settings.overrideResponders"
-           tooltip="Allow the alert responders to be set using the og_responders tag">
-        </gf-form-switch>
-      </div>
 `,
 	})
 }
@@ -90,7 +81,6 @@ func NewOpsGenieNotifier(model *models.AlertNotification) (alerting.Notifier, er
 	alias := model.Settings.Get("alias").MustString()
 	overrideAlias := model.Settings.Get("overrideAlias").MustBool(true)
 	overridePriority := model.Settings.Get("overridePriority").MustBool(true)
-	overrideResponders := model.Settings.Get("overrideResponders").MustBool(true)
 	apiKey := model.Settings.Get("apiKey").MustString()
 	apiURL := model.Settings.Get("apiUrl").MustString()
 	if apiKey == "" {
@@ -101,15 +91,14 @@ func NewOpsGenieNotifier(model *models.AlertNotification) (alerting.Notifier, er
 	}
 
 	return &OpsGenieNotifier{
-		NotifierBase:       NewNotifierBase(model),
-		APIKey:             apiKey,
-		APIUrl:             apiURL,
-		AutoClose:          autoClose,
-		Alias:              alias,
-		OverrideAlias:      overrideAlias,
-		OverridePriority:   overridePriority,
-		OverrideResponders: overrideResponders,
-		log:                log.New("alerting.notifier.opsgenie"),
+		NotifierBase:     NewNotifierBase(model),
+		APIKey:           apiKey,
+		APIUrl:           apiURL,
+		AutoClose:        autoClose,
+		Alias:            alias,
+		OverrideAlias:    overrideAlias,
+		OverridePriority: overridePriority,
+		log:              log.New("alerting.notifier.opsgenie"),
 	}, nil
 }
 
@@ -117,14 +106,13 @@ func NewOpsGenieNotifier(model *models.AlertNotification) (alerting.Notifier, er
 // alert notifications to OpsGenie
 type OpsGenieNotifier struct {
 	NotifierBase
-	APIKey             string
-	APIUrl             string
-	AutoClose          bool
-	Alias              string
-	OverrideAlias      bool
-	OverridePriority   bool
-	OverrideResponders bool
-	log                log.Logger
+	APIKey           string
+	APIUrl           string
+	AutoClose        bool
+	Alias            string
+	OverrideAlias    bool
+	OverridePriority bool
+	log              log.Logger
 }
 
 // Notify sends an alert notification to OpsGenie.
@@ -186,10 +174,6 @@ func (on *OpsGenieNotifier) createAlert(evalContext *alerting.EvalContext) error
 		} else if tag.Key == "og_alias" {
 			if on.OverrideAlias && len(tag.Value) > 0 {
 				aliasSource = tag.Value
-			}
-		} else if tag.Key == "og_responders" {
-			if on.OverrideResponders && len(tag.Value) > 0 {
-				bodyJSON.Set("responders", tag.Value)
 			}
 		}
 	}
